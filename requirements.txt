@@ -2,6 +2,6 @@ pandas
 numpy
 scikit-learn
 joblib
-streamlit
-altair==4.2.2
 matplotlib
+streamlit==1.19.0
+altair==4.2.2
