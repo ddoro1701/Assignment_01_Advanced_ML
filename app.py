@@ -8,7 +8,7 @@ import streamlit as st
 
 st.set_page_config(page_title="Crime type prediction", layout="centered")
 
-ARTIFACTS_DIR = Path("artifacts")
+ARTIFACTS_DIR = Path(".")
 MODEL_PATH = ARTIFACTS_DIR / "model.joblib"
 META_PATH = ARTIFACTS_DIR / "meta.json"
 
@@ -106,3 +106,4 @@ if submitted:
             .head(5)
         )
         st.dataframe(out, use_container_width=True)
+
