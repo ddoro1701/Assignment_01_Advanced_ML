@@ -8,53 +8,32 @@ import streamlit as st
 
 st.set_page_config(page_title="Crime type prediction", layout="centered")
 
-ARTIFACTS_DIR = Path(".")
-MODEL_PATH = ARTIFACTS_DIR / "model.joblib"
-META_PATH = ARTIFACTS_DIR / "meta.json"
-LSOA_PATH = ARTIFACTS_DIR / "lsoa_lookup.csv"
+BASE_DIR = Path(".")
+MODEL_PATH = BASE_DIR / "model.joblib"
+META_PATH = BASE_DIR / "meta.json"
+LSOA_PATH = BASE_DIR / "lsoa_lookup.csv"
 
 @st.cache_resource
-def load_model():
-    if not MODEL_PATH.exists():
-        st.error(f"Missing file: {MODEL_PATH}")
-        st.stop()
+def load_model(model_mtime: float):
     return joblib.load(MODEL_PATH)
 
 @st.cache_data
-def load_meta():
-    if not META_PATH.exists():
-        st.error(f"Missing file: {META_PATH}")
-        st.stop()
+def load_meta(meta_mtime: float):
     with open(META_PATH, "r", encoding="utf-8") as f:
-        meta = json.load(f)
-
-    required = ["defaults", "feature_columns", "cat_cols", "num_cols", "data_months"]
-    missing = [k for k in required if k not in meta]
-    if missing:
-        st.error(f"meta.json missing keys: {missing}")
-        st.stop()
-
-    return meta
+        return json.load(f)
 
 @st.cache_data
-def load_lsoa_lookup():
-    if not LSOA_PATH.exists():
-        st.error(f"Missing file: {LSOA_PATH}")
-        st.stop()
-
-    lsoa_df = pd.read_csv(LSOA_PATH)
+def load_lsoa_lookup(lsoa_mtime: float):
+    df = pd.read_csv(LSOA_PATH)
     need = ["LSOA code", "LSOA name", "lat_med", "lon_med"]
-    miss = [c for c in need if c not in lsoa_df.columns]
-    if miss:
-        st.error(f"lsoa_lookup.csv missing columns: {miss}")
-        st.stop()
-
-    lsoa_df = lsoa_df.dropna(subset=["LSOA code", "LSOA name"]).reset_index(drop=True)
-    if len(lsoa_df) == 0:
-        st.error("lsoa_lookup.csv has no valid rows.")
-        st.stop()
-
-    return lsoa_df
+    for c in need:
+        if c not in df.columns:
+            raise ValueError(f"lsoa_lookup.csv missing column: {c}")
+    df = df.dropna(subset=["LSOA code", "LSOA name"]).reset_index(drop=True)
+    if "n" in df.columns:
+        df = df.sort_values("n", ascending=False)
+    df = df.head(3000).reset_index(drop=True)
+    return df
 
 def safe_float(x, fallback=0.0):
     try:
@@ -65,12 +44,28 @@ def safe_float(x, fallback=0.0):
     except Exception:
         return float(fallback)
 
-model = load_model()
-meta = load_meta()
-lsoa_df = load_lsoa_lookup()
-
 st.title("Crime type prediction")
 st.write("The model predicts one of the top crime types plus Other.")
+
+try:
+    if not META_PATH.exists():
+        raise FileNotFoundError(f"Missing file: {META_PATH}")
+    if not LSOA_PATH.exists():
+        raise FileNotFoundError(f"Missing file: {LSOA_PATH}")
+    if not MODEL_PATH.exists():
+        raise FileNotFoundError(f"Missing file: {MODEL_PATH}")
+
+    meta = load_meta(META_PATH.stat().st_mtime)
+    lsoa_df = load_lsoa_lookup(LSOA_PATH.stat().st_mtime)
+except Exception as e:
+    st.error(str(e))
+    st.stop()
+
+required = ["defaults", "feature_columns", "cat_cols", "num_cols", "data_months"]
+missing = [k for k in required if k not in meta]
+if missing:
+    st.error(f"meta.json missing keys: {missing}")
+    st.stop()
 
 defaults = dict(meta["defaults"])
 feature_columns = list(meta["feature_columns"])
@@ -110,11 +105,6 @@ with st.form("predict_form"):
     row["Latitude"] = safe_float(sel["lat_med"], fallback=safe_float(row.get("Latitude", 0.0), 0.0))
     row["Longitude"] = safe_float(sel["lon_med"], fallback=safe_float(row.get("Longitude", 0.0), 0.0))
 
-    st.write("Selected LSOA code:", row["LSOA code"])
-    st.write("Selected LSOA name:", row["LSOA name"])
-    st.write("Latitude:", row["Latitude"])
-    st.write("Longitude:", row["Longitude"])
-
     for c in cat_cols:
         if c in ["LSOA code", "LSOA name"]:
             continue
@@ -131,8 +121,13 @@ with st.form("predict_form"):
     submitted = st.form_submit_button("Predict")
 
 if submitted:
-    X = pd.DataFrame([row]).reindex(columns=feature_columns)
+    try:
+        model = load_model(MODEL_PATH.stat().st_mtime)
+    except Exception as e:
+        st.error(f"Model load failed: {e}")
+        st.stop()
 
+    X = pd.DataFrame([row]).reindex(columns=feature_columns)
     pred = model.predict(X)[0]
     st.write("Prediction:", pred)
 
