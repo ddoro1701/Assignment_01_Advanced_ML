@@ -48,8 +48,6 @@ def safe_float(x, fallback=0.0):
     except Exception:
         return float(fallback)
 
-print("APP START")
-
 if not META_PATH.exists():
     st.error(f"Missing file: {META_PATH}")
     st.stop()
@@ -60,7 +58,6 @@ if not MODEL_PATH.exists():
     st.error(f"Missing file: {MODEL_PATH}")
     st.stop()
 
-print("LOADING META")
 meta = load_meta(META_PATH.stat().st_mtime)
 
 required = ["defaults", "feature_columns", "cat_cols", "num_cols", "data_months"]
@@ -69,7 +66,6 @@ if missing:
     st.error(f"meta.json missing keys: {missing}")
     st.stop()
 
-print("LOADING LSOA LOOKUP")
 lsoa_df = load_lsoa_lookup(LSOA_PATH.stat().st_mtime)
 
 st.title("Crime type prediction")
@@ -96,32 +92,44 @@ st.subheader("Inputs")
 search = st.text_input("Search LSOA code or name", value="")
 if search.strip():
     s = search.strip().lower()
-    filt = lsoa_df["LSOA code"].astype(str).str.lower().str.contains(s) | lsoa_df["LSOA name"].astype(str).str.lower().str.contains(s)
+    filt = (
+        lsoa_df["LSOA code"].astype(str).str.lower().str.contains(s)
+        | lsoa_df["LSOA name"].astype(str).str.lower().str.contains(s)
+    )
     lsoa_view = lsoa_df.loc[filt].head(200).reset_index(drop=True)
 else:
     lsoa_view = lsoa_df
 
-with st.form("predict_form"):
-    year = st.selectbox("Year", years, index=len(years) - 1)
-    months_available = sorted(year_to_months.get(int(year), set()))
-    month_num = st.selectbox("Month", months_available, index=len(months_available) - 1)
+if "year" not in st.session_state:
+    st.session_state.year = years[-1]
 
-    lsoa_choice = st.selectbox("LSOA", lsoa_view["display"].tolist(), index=0)
-    sel = lsoa_view.loc[lsoa_view["display"] == lsoa_choice].iloc[0]
+if "month_num" not in st.session_state:
+    st.session_state.month_num = sorted(year_to_months[st.session_state.year])[-1]
 
+def sync_month():
+    months = sorted(year_to_months[st.session_state.year])
+    if st.session_state.month_num not in months:
+        st.session_state.month_num = months[-1]
+
+year = st.selectbox("Year", years, key="year", on_change=sync_month)
+months_available = sorted(year_to_months[st.session_state.year])
+month_num = st.selectbox("Month", months_available, key="month_num")
+
+lsoa_choice = st.selectbox("LSOA", lsoa_view["display"].tolist(), index=0)
+sel = lsoa_view.loc[lsoa_view["display"] == lsoa_choice].iloc[0]
+
+predict = st.button("Predict")
+
+if predict:
     row = defaults.copy()
-    row["year"] = int(year)
-    row["month_num"] = int(month_num)
+    row["year"] = int(st.session_state.year)
+    row["month_num"] = int(st.session_state.month_num)
 
     row["LSOA code"] = str(sel["LSOA code"])
     row["LSOA name"] = str(sel["LSOA name"])
     row["Latitude"] = safe_float(sel["lat_med"], fallback=safe_float(row.get("Latitude", 0.0), 0.0))
     row["Longitude"] = safe_float(sel["lon_med"], fallback=safe_float(row.get("Longitude", 0.0), 0.0))
 
-    submitted = st.form_submit_button("Predict")
-
-if submitted:
-    print("LOADING MODEL")
     model = load_model(MODEL_PATH.stat().st_mtime)
 
     X = pd.DataFrame([row]).reindex(columns=feature_columns)
