@@ -101,18 +101,22 @@ if search.strip():
 else:
     lsoa_view = lsoa_df
 
-data_months = [m for m in meta["data_months"] if isinstance(m, str) and len(m) == 7 and m[4] == "-"]
-data_months = sorted(data_months)
-
 with st.form("predict_form"):
-    ym = st.selectbox("Month (YYYY-MM)", data_months, index=len(data_months) - 1)
+    year = st.selectbox("Year", years, index=len(years) - 1)
+    months_available = sorted(year_to_months.get(int(year), set()))
+    month_num = st.selectbox("Month", months_available, index=len(months_available) - 1)
 
-    year = int(ym[:4])
-    month_num = int(ym[5:7])
+    lsoa_choice = st.selectbox("LSOA", lsoa_view["display"].tolist(), index=0)
+    sel = lsoa_view.loc[lsoa_view["display"] == lsoa_choice].iloc[0]
 
     row = defaults.copy()
-    row["year"] = year
-    row["month_num"] = month_num
+    row["year"] = int(year)
+    row["month_num"] = int(month_num)
+
+    row["LSOA code"] = str(sel["LSOA code"])
+    row["LSOA name"] = str(sel["LSOA name"])
+    row["Latitude"] = safe_float(sel["lat_med"], fallback=safe_float(row.get("Latitude", 0.0), 0.0))
+    row["Longitude"] = safe_float(sel["lon_med"], fallback=safe_float(row.get("Longitude", 0.0), 0.0))
 
     submitted = st.form_submit_button("Predict")
 
@@ -132,4 +136,3 @@ if submitted:
             .head(5)
         )
         st.dataframe(out, use_container_width=True)
-
