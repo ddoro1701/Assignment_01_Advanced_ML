@@ -1,8 +1,7 @@
-# Pin package versions for model loading
 streamlit==1.55.0
-pandas==2.3.3
-numpy==2.4.2
+pandas
+numpy
 scikit-learn==1.6.1
-joblib==1.5.3
-matplotlib==3.10.8
-scipy==1.16.2
+joblib
+matplotlib
+scipy
