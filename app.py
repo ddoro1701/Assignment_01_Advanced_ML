@@ -1,146 +1,114 @@
-import json
+# Load libraries
 from pathlib import Path
+import json
 
 import joblib
-import numpy as np
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(page_title="Crime type prediction", layout="centered")
+# Set page
+st.set_page_config(page_title="North Wales Crime Forecast", layout="wide")
 
-BASE_DIR = Path(".")
-MODEL_PATH = BASE_DIR / "model.joblib"
-META_PATH = BASE_DIR / "meta.json"
-LSOA_PATH = BASE_DIR / "lsoa_lookup.csv"
+# Set paths
+BASE_DIR = Path(__file__).resolve().parent
+ARTIFACT_DIR = BASE_DIR / "artifacts"
 
-@st.cache_data
-def load_meta(meta_mtime: float):
-    with open(META_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-@st.cache_data
-def load_lsoa_lookup(lsoa_mtime: float):
-    df = pd.read_csv(LSOA_PATH)
-    need = ["LSOA code", "LSOA name", "lat_med", "lon_med"]
-    for c in need:
-        if c not in df.columns:
-            raise ValueError(f"lsoa_lookup.csv missing column: {c}")
-
-    df = df.dropna(subset=["LSOA code", "LSOA name"]).copy()
-
-    if "n" in df.columns:
-        df = df.sort_values("n", ascending=False)
-
-    df = df.head(3000).reset_index(drop=True)
-    df["display"] = df["LSOA code"].astype(str) + " | " + df["LSOA name"].astype(str)
-    return df
-
+# Load model once
 @st.cache_resource
-def load_model(model_mtime: float):
-    return joblib.load(MODEL_PATH)
+def load_model():
+    return joblib.load(ARTIFACT_DIR / "model.joblib")
 
-def safe_float(x, fallback=0.0):
-    try:
-        v = float(x)
-        if np.isfinite(v):
-            return v
-        return float(fallback)
-    except Exception:
-        return float(fallback)
+# Load tables once
+@st.cache_data
+def load_data():
+    with open(ARTIFACT_DIR / "meta.json", "r") as f:
+        meta = json.load(f)
 
-if not META_PATH.exists():
-    st.error(f"Missing file: {META_PATH}")
-    st.stop()
-if not LSOA_PATH.exists():
-    st.error(f"Missing file: {LSOA_PATH}")
-    st.stop()
-if not MODEL_PATH.exists():
-    st.error(f"Missing file: {MODEL_PATH}")
-    st.stop()
+    latest_features = pd.read_csv(ARTIFACT_DIR / "latest_features.csv")
+    latest_features["Month"] = pd.to_datetime(latest_features["Month"])
+    latest_features["forecast_month"] = pd.to_datetime(latest_features["forecast_month"])
 
-meta = load_meta(META_PATH.stat().st_mtime)
+    results = pd.read_csv(ARTIFACT_DIR / "results.csv")
+    lsoa_lookup = pd.read_csv(ARTIFACT_DIR / "lsoa_lookup.csv")
 
-required = ["defaults", "feature_columns", "cat_cols", "num_cols", "data_months"]
-missing = [k for k in required if k not in meta]
-if missing:
-    st.error(f"meta.json missing keys: {missing}")
-    st.stop()
+    return meta, latest_features, results, lsoa_lookup
 
-lsoa_df = load_lsoa_lookup(LSOA_PATH.stat().st_mtime)
+# Read files
+model = load_model()
+meta, latest_features, results, lsoa_lookup = load_data()
 
-st.title("Crime type prediction")
-st.write("The model predicts one of the top crime types plus Other.")
+# Title
+st.title("North Wales Crime Forecast")
+st.write("Next-month crime count forecast by LSOA.")
 
-defaults = dict(meta["defaults"])
-feature_columns = list(meta["feature_columns"])
-cat_cols = list(meta["cat_cols"])
-num_cols = list(meta["num_cols"])
+# Build labels
+latest_features["label"] = (
+    latest_features["LSOA name"].astype(str)
+    + " | "
+    + latest_features["LSOA code"].astype(str)
+)
 
-data_months = [str(x) for x in meta["data_months"] if isinstance(x, str) and "-" in x]
-year_to_months = {}
-for ym in data_months:
-    y, m = ym.split("-")
-    year_to_months.setdefault(int(y), set()).add(int(m))
+labels = sorted(latest_features["label"].unique().tolist())
 
-years = sorted(year_to_months.keys())
-if not years:
-    st.error("No valid data_months found in meta.json")
-    st.stop()
+# Pick one LSOA
+selected_label = st.selectbox("Select LSOA", labels)
 
-st.subheader("Inputs")
+# Get one row
+row = latest_features.loc[latest_features["label"] == selected_label].copy().iloc[[0]]
 
-search = st.text_input("Search LSOA code or name", value="")
-if search.strip():
-    s = search.strip().lower()
-    filt = (
-        lsoa_df["LSOA code"].astype(str).str.lower().str.contains(s)
-        | lsoa_df["LSOA name"].astype(str).str.lower().str.contains(s)
-    )
-    lsoa_view = lsoa_df.loc[filt].head(200).reset_index(drop=True)
-else:
-    lsoa_view = lsoa_df
+# Build model input
+feature_cols = meta["feature_cols"]
+X_row = row[feature_cols].copy()
 
-if "year" not in st.session_state:
-    st.session_state.year = years[-1]
+# Run prediction
+pred = float(model.predict(X_row)[0])
+pred = max(0.0, pred)
 
-if "month_num" not in st.session_state:
-    st.session_state.month_num = sorted(year_to_months[st.session_state.year])[-1]
+# Baseline
+baseline = float(row["lag_1"].iloc[0])
 
-def sync_month():
-    months = sorted(year_to_months[st.session_state.year])
-    if st.session_state.month_num not in months:
-        st.session_state.month_num = months[-1]
+# Read dates
+observed_month = pd.to_datetime(row["Month"].iloc[0]).strftime("%Y-%m")
+forecast_month = pd.to_datetime(row["forecast_month"].iloc[0]).strftime("%Y-%m")
 
-year = st.selectbox("Year", years, key="year", on_change=sync_month)
-months_available = sorted(year_to_months[st.session_state.year])
-month_num = st.selectbox("Month", months_available, key="month_num")
+# Main metrics
+col1, col2, col3 = st.columns(3)
+col1.metric("Forecast month", forecast_month)
+col2.metric("Model prediction", f"{pred:.2f}")
+col3.metric("Naive baseline", f"{baseline:.2f}", delta=f"{pred - baseline:.2f}")
 
-lsoa_choice = st.selectbox("LSOA", lsoa_view["display"].tolist(), index=0)
-sel = lsoa_view.loc[lsoa_view["display"] == lsoa_choice].iloc[0]
+# Area details
+st.subheader("Selected area")
+st.write(f"LSOA name: {row['LSOA name'].iloc[0]}")
+st.write(f"LSOA code: {row['LSOA code'].iloc[0]}")
+st.write(f"Latest observed month: {observed_month}")
 
-predict = st.button("Predict")
+# Feature view
+st.subheader("Input features")
+show_cols = [
+    "lag_1",
+    "lag_2",
+    "lag_3",
+    "roll_mean_3",
+    "roll_mean_6",
+    "month_num",
+    "month_sin",
+    "month_cos",
+]
+st.dataframe(row[show_cols].T.rename(columns={row.index[0]: "value"}))
 
-if predict:
-    row = defaults.copy()
-    row["year"] = int(st.session_state.year)
-    row["month_num"] = int(st.session_state.month_num)
+# Model table
+st.subheader("Model comparison")
+st.dataframe(results)
 
-    row["LSOA code"] = str(sel["LSOA code"])
-    row["LSOA name"] = str(sel["LSOA name"])
-    row["Latitude"] = safe_float(sel["lat_med"], fallback=safe_float(row.get("Latitude", 0.0), 0.0))
-    row["Longitude"] = safe_float(sel["lon_med"], fallback=safe_float(row.get("Longitude", 0.0), 0.0))
+# Saved plots
+plot1 = ARTIFACT_DIR / "forecast_vs_actual_test.png"
+plot2 = ARTIFACT_DIR / "residuals_test.png"
 
-    model = load_model(MODEL_PATH.stat().st_mtime)
+if plot1.exists():
+    st.subheader("Forecast vs actual")
+    st.image(str(plot1))
 
-    X = pd.DataFrame([row]).reindex(columns=feature_columns)
-    pred = model.predict(X)[0]
-    st.write("Prediction:", pred)
-
-    if hasattr(model, "predict_proba"):
-        proba = model.predict_proba(X)[0]
-        out = (
-            pd.DataFrame({"label": model.classes_, "prob": proba})
-            .sort_values("prob", ascending=False)
-            .head(5)
-        )
-        st.dataframe(out, use_container_width=True)
+if plot2.exists():
+    st.subheader("Residuals")
+    st.image(str(plot2))
