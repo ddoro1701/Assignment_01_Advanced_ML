@@ -1,0 +1,24 @@
+{
+  "best_model": "tweedie_p_1.3",
+  "feature_cols": [
+    "LSOA code",
+    "month_num",
+    "month_sin",
+    "month_cos",
+    "lag_1",
+    "lag_2",
+    "lag_3",
+    "roll_mean_3",
+    "roll_mean_6"
+  ],
+  "train_months": [
+    "2025-01",
+    "2025-10"
+  ],
+  "val_month": "2025-11",
+  "test_month": "2025-12",
+  "forecast_target_for_test": "2026-01",
+  "target_name": "next_month_crime_count",
+  "latest_observed_month": "2026-01-01",
+  "app_forecast_month": "2026-02-01"
+}
