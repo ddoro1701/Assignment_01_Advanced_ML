@@ -44,13 +44,18 @@ def load_artifacts():
         results = pd.read_csv(ARTIFACT_DIR / "results.csv")
         lsoa_lookup = pd.read_csv(ARTIFACT_DIR / "lsoa_lookup.csv")
 
-        history_path = ARTIFACT_DIR / "history.csv"
         history = None
+        history_path = ARTIFACT_DIR / "history.csv"
         if history_path.exists():
             history = pd.read_csv(history_path)
             history["Month"] = pd.to_datetime(history["Month"], errors="coerce")
 
-        return meta, latest_features, results, lsoa_lookup, history
+        centroids = None
+        centroids_path = ARTIFACT_DIR / "lsoa_centroids.csv"
+        if centroids_path.exists():
+            centroids = pd.read_csv(centroids_path)
+
+        return meta, latest_features, results, lsoa_lookup, history, centroids
 
     except Exception as e:
         st.error(f"Artifact load failed: {e}")
@@ -89,7 +94,16 @@ def build_feature_table(row):
 
 # Load model and artifacts
 model = load_model()
-meta, latest_features, results, lsoa_lookup, history = load_artifacts()
+meta, latest_features, results, lsoa_lookup, history, centroids = load_artifacts()
+
+
+# Merge map coordinates if available
+if centroids is not None:
+    latest_features = latest_features.merge(
+        centroids,
+        on=["LSOA code", "LSOA name"],
+        how="left"
+    )
 
 
 # Create a readable label for selection
@@ -179,6 +193,26 @@ with tab1:
     })
     st.dataframe(details_df, use_container_width=True, hide_index=True)
 
+    st.subheader("Approximate location")
+    st.write(
+        "The forecast is made at LSOA level. The map below shows an approximate point for the selected area, not the full boundary."
+    )
+
+    if "lat_med" in row.columns and "lon_med" in row.columns:
+        lat_val = row["lat_med"].iloc[0]
+        lon_val = row["lon_med"].iloc[0]
+
+        if pd.notna(lat_val) and pd.notna(lon_val):
+            map_df = pd.DataFrame({
+                "lat": [lat_val],
+                "lon": [lon_val]
+            })
+            st.map(map_df, zoom=11)
+        else:
+            st.write("No map coordinates are available for this LSOA.")
+    else:
+        st.write("No map coordinates file was found.")
+
     st.subheader("Input features used for prediction")
     feature_display = build_feature_table(row)
     st.dataframe(feature_display, use_container_width=True, hide_index=True)
@@ -200,7 +234,6 @@ with tab1:
             "This suggests little expected change relative to the previous month."
         )
 
-    # Show historical trend if history.csv exists
     if history is not None:
         hist_area = history.loc[history["LSOA code"] == selected_lsoa_code].copy()
         hist_area = hist_area.sort_values("Month")
@@ -226,7 +259,6 @@ with tab2:
 
     st.dataframe(results, use_container_width=True, hide_index=True)
 
-    # Highlight the best model row if possible
     if "model" in results.columns:
         best_row = results.loc[results["model"] == best_model_name]
         if not best_row.empty:
@@ -294,14 +326,16 @@ with tab3:
             "latest_features.csv",
             "meta.json",
             "results.csv",
-            "lsoa_lookup.csv"
+            "lsoa_lookup.csv",
+            "lsoa_centroids.csv"
         ],
         "Purpose": [
             "Saved trained model pipeline",
             "Latest input rows used for prediction",
             "Project metadata and selected feature names",
             "Model comparison results",
-            "Lookup information for LSOA names and codes"
+            "Lookup information for LSOA names and codes",
+            "Approximate map point for each LSOA"
         ]
     })
     st.dataframe(artifact_df, use_container_width=True, hide_index=True)
