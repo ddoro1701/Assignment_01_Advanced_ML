@@ -5,7 +5,7 @@ import json
 import joblib
 import pandas as pd
 import streamlit as st
-
+import altair as alt
 
 # Set up the page
 st.set_page_config(
@@ -234,7 +234,7 @@ with tab1:
             "This suggests little expected change relative to the previous month."
         )
 
-    # Show recent history with the predicted next point
+    # Show recent history with visible forecast and baseline points
 if history is not None:
     hist_area = history.loc[history["LSOA code"] == selected_lsoa_code].copy()
     hist_area = hist_area.sort_values("Month")
@@ -242,32 +242,88 @@ if history is not None:
     if not hist_area.empty:
         st.subheader("Recent crime history for this LSOA")
 
-        # Build observed history
+        # Build observed series
         observed_df = hist_area[["Month", "crime_count"]].copy()
-        observed_df = observed_df.rename(columns={"crime_count": "Observed"})
+        observed_df["Series"] = "Observed"
 
-        # Build one forecast row
-        forecast_df = pd.DataFrame({
-            "Month": [forecast_month],
-            "Observed": [None],
-            "Model prediction": [pred],
-            "Naive baseline": [baseline]
+        # Get the last observed point
+        last_month = observed_df["Month"].max()
+        last_value = float(observed_df.loc[observed_df["Month"] == last_month, "crime_count"].iloc[0])
+
+        # Build model forecast segment from last observed point
+        model_df = pd.DataFrame({
+            "Month": [last_month, forecast_month],
+            "crime_count": [last_value, pred],
+            "Series": ["Model prediction", "Model prediction"]
         })
 
-        # Add empty forecast columns to observed data
-        observed_df["Model prediction"] = None
-        observed_df["Naive baseline"] = None
+        # Build baseline forecast segment from last observed point
+        baseline_df = pd.DataFrame({
+            "Month": [last_month, forecast_month],
+            "crime_count": [last_value, baseline],
+            "Series": ["Naive baseline", "Naive baseline"]
+        })
 
-        # Combine history and forecast point
-        chart_df = pd.concat([observed_df, forecast_df], ignore_index=True)
-        chart_df = chart_df.set_index("Month")
+        # Combine all series
+        chart_df = pd.concat([observed_df, model_df, baseline_df], ignore_index=True)
 
-        # Show the chart
-        st.line_chart(chart_df)
+        # Base chart settings
+        base = alt.Chart(chart_df).encode(
+            x=alt.X("Month:T", title="Month"),
+            y=alt.Y("crime_count:Q", title="Crime count"),
+            color=alt.Color("Series:N", title="Series")
+        )
+
+        # Observed history as one continuous line
+        observed_line = base.transform_filter(
+            alt.datum.Series == "Observed"
+        ).mark_line()
+
+        observed_points = base.transform_filter(
+            alt.datum.Series == "Observed"
+        ).mark_point(filled=True, size=45)
+
+        # Model prediction as a connected line from the last observed point
+        model_line = base.transform_filter(
+            alt.datum.Series == "Model prediction"
+        ).mark_line(strokeDash=[6, 3])
+
+        model_points = base.transform_filter(
+            alt.datum.Series == "Model prediction"
+        ).mark_point(filled=True, size=90)
+
+        # Naive baseline as a connected line from the last observed point
+        baseline_line = base.transform_filter(
+            alt.datum.Series == "Naive baseline"
+        ).mark_line(strokeDash=[2, 2])
+
+        baseline_points = base.transform_filter(
+            alt.datum.Series == "Naive baseline"
+        ).mark_point(filled=True, size=90)
+
+        # Add a vertical rule at the forecast month
+        rule_df = pd.DataFrame({"Month": [forecast_month]})
+        forecast_rule = alt.Chart(rule_df).mark_rule().encode(x="Month:T")
+
+        # Combine layers
+        chart = (
+            alt.layer(
+                observed_line,
+                observed_points,
+                model_line,
+                model_points,
+                baseline_line,
+                baseline_points,
+                forecast_rule
+            )
+            .properties(height=380)
+        )
+
+        st.altair_chart(chart, use_container_width=True)
 
         st.caption(
-            "Observed values are historical monthly crime counts. "
-            "The final point shows the next-month model prediction and the naive baseline."
+            "The solid line shows observed monthly crime counts. "
+            "The two projected lines show the next-month model prediction and the naive baseline."
         )
 
 
