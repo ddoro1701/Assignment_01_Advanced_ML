@@ -234,14 +234,41 @@ with tab1:
             "This suggests little expected change relative to the previous month."
         )
 
-    if history is not None:
-        hist_area = history.loc[history["LSOA code"] == selected_lsoa_code].copy()
-        hist_area = hist_area.sort_values("Month")
+    # Show recent history with the predicted next point
+if history is not None:
+    hist_area = history.loc[history["LSOA code"] == selected_lsoa_code].copy()
+    hist_area = hist_area.sort_values("Month")
 
-        if not hist_area.empty:
-            st.subheader("Recent crime history for this LSOA")
-            chart_df = hist_area[["Month", "crime_count"]].set_index("Month")
-            st.line_chart(chart_df)
+    if not hist_area.empty:
+        st.subheader("Recent crime history for this LSOA")
+
+        # Build observed history
+        observed_df = hist_area[["Month", "crime_count"]].copy()
+        observed_df = observed_df.rename(columns={"crime_count": "Observed"})
+
+        # Build one forecast row
+        forecast_df = pd.DataFrame({
+            "Month": [forecast_month],
+            "Observed": [None],
+            "Model prediction": [pred],
+            "Naive baseline": [baseline]
+        })
+
+        # Add empty forecast columns to observed data
+        observed_df["Model prediction"] = None
+        observed_df["Naive baseline"] = None
+
+        # Combine history and forecast point
+        chart_df = pd.concat([observed_df, forecast_df], ignore_index=True)
+        chart_df = chart_df.set_index("Month")
+
+        # Show the chart
+        st.line_chart(chart_df)
+
+        st.caption(
+            "Observed values are historical monthly crime counts. "
+            "The final point shows the next-month model prediction and the naive baseline."
+        )
 
 
 # Show model comparison and saved evaluation outputs
@@ -339,3 +366,4 @@ with tab3:
         ]
     })
     st.dataframe(artifact_df, use_container_width=True, hide_index=True)
+
