@@ -6,6 +6,8 @@ import joblib
 import pandas as pd
 import streamlit as st
 import altair as alt
+import json
+import pydeck as pdk
 
 # Set up the page
 st.set_page_config(
@@ -60,7 +62,14 @@ def load_artifacts():
     except Exception as e:
         st.error(f"Artifact load failed: {e}")
         st.stop()
-
+        
+@st.cache_data
+def load_forecast_map():
+    map_path = ARTIFACT_DIR / "forecast_map.geojson"
+    if map_path.exists():
+        with open(map_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return None
 
 # Format metric values
 def fmt_value(x, digits=2):
@@ -95,6 +104,8 @@ def build_feature_table(row):
 # Load model and artifacts
 model = load_model()
 meta, latest_features, results, lsoa_lookup, history, centroids = load_artifacts()
+
+forecast_map = load_forecast_map()
 
 
 # Merge map coordinates if available
