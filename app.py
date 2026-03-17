@@ -535,7 +535,11 @@ with tab1:
 
 
     st.subheader("Predicted crime hotspots by LSOA")
+    st.write("forecast_map path exists:", (ARTIFACT_DIR / "forecast_map.geojson").exists())
+    st.write("forecast_map loaded:", forecast_map is not None)
 
+if forecast_map is not None:
+    st.write("feature count:", len(forecast_map.get("features", [])))
     st.write(
 
         "This map shows predicted next-month crime counts by LSOA. "
